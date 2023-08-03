@@ -78,8 +78,9 @@ window.assignManager = {
         });
       }
       // eslint-disable-next-line require-atomic-updates
-      data.identityMacAddonUUID =
-        await identityState.lookupMACaddonUUID(data.userContextId);
+      data.identityMacAddonUUIDList = await Promise.all(
+        data.userContextIds.map(id => identityState.lookupMACaddonUUID(id))
+      );
       await this.area.set({
         [siteStoreKey]: data
       });
@@ -102,7 +103,16 @@ window.assignManager = {
 
     async deleteContainer(userContextId) {
       const sitesByContainer = await this.getAssignedSites(userContextId);
-      this.area.remove(Object.keys(sitesByContainer));
+      const deleteKeys = [];
+      for (const [urlKey, urlData] of Object.entries(sitesByContainer)) {
+        urlData.userContextIds = urlData.userContextIds.filter(id => id !== userContextId);
+        if (urlData.userContextIds.length) {
+          this.set(urlKey, urlData, []);
+        } else {
+          deleteKeys.push(urlKey);
+        }
+      }
+      this.area.remove(deleteKeys);
       identityState.storageArea.remove(backgroundLogic.cookieStoreId(userContextId));
     },
 
@@ -111,11 +121,8 @@ window.assignManager = {
       const siteConfigs = await this.area.get();
       for(const urlKey of Object.keys(siteConfigs)) {
         if (urlKey.includes("siteContainerMap@@_")) {
-        // For some reason this is stored as string... lets check
-        // them both as that
           if (!!userContextId &&
-              String(siteConfigs[urlKey].userContextId)
-                !== String(userContextId)) {
+              !siteConfigs[urlKey].userContextIds.includes(String(userContextId))) {
             continue;
           }
           const site = siteConfigs[urlKey];
@@ -138,18 +145,26 @@ window.assignManager = {
       const macConfigs = await this.area.get();
       for(const configKey of Object.keys(macConfigs)) {
         if (configKey.includes("siteContainerMap@@_")) {
-          const cookieStoreId =
-            "firefox-container-" + macConfigs[configKey].userContextId;
-          const match = identitiesList.find(
-            localIdentity => localIdentity.cookieStoreId === cookieStoreId
-          );
-          if (!match) {
+          const validContextIds = [];
+          for (const userContextId of macConfigs[configKey].userContextIds) {
+            const cookieStoreId =
+              "firefox-container-" + macConfigs[configKey].userContextId;
+            const match = identitiesList.find(
+              localIdentity => localIdentity.cookieStoreId === cookieStoreId
+            );
+            if (match) {
+              validContextIds.push(userContextId);
+            }
+          }
+          if (!validContextIds.length) {
             await this.remove(configKey);
             continue;
           }
           const updatedSiteAssignment = macConfigs[configKey];
-          updatedSiteAssignment.identityMacAddonUUID =
-            await identityState.lookupMACaddonUUID(match.cookieStoreId);
+          updatedSiteAssignment.userContextIds = validContextIds;
+          updatedSiteAssignment.identityMacAddonUUIDList = await Promise.all(
+            validContextIds.map(id => identityState.lookupMACaddonUUID(id))
+          );
           await this.set(
             configKey,
             updatedSiteAssignment,
@@ -223,21 +238,31 @@ window.assignManager = {
       browser.tabs.get(options.tabId),
       this.storageArea.get(options.url)
     ]);
-    let container;
-    try {
-      container = await browser.contextualIdentities
-        .get(backgroundLogic.cookieStoreId(siteSettings.userContextId));
-    } catch (e) {
-      container = false;
+    const containers = [];
+    for (const userContextId of (siteSettings ? siteSettings.userContextIds : [])) {
+      let container;
+      try {
+        container = await browser.contextualIdentities
+          .get(backgroundLogic.cookieStoreId(userContextId));
+      } catch (e) {
+        container = false;
+      }
+
+      // The container we have in the assignment map isn't present any
+      // more so lets remove it
+      if (!container) {
+        this.deleteContainer(userContextId);
+        continue;
+      }
+      containers.push(container);
     }
 
-    // The container we have in the assignment map isn't present any
-    // more so lets remove it then continue the existing load
-    if (siteSettings && !container) {
-      this.deleteContainer(siteSettings.userContextId);
+    // No container we have in the assignment map is present any
+    // more so lets continue the existing load
+    if (siteSettings && !containers.length) {
       return {};
     }
-    const userContextId = this.getUserContextIdFromCookieStore(tab);
+    const currentUserContextId = this.getUserContextIdFromCookieStore(tab);
 
     // https://github.com/mozilla/multi-account-containers/issues/847
     //
@@ -261,7 +286,7 @@ window.assignManager = {
 
     if (!siteIsolatedReloadInDefault) {
       if (!siteSettings
-          || userContextId === siteSettings.userContextId
+          || siteSettings.userContextIds.includes(currentUserContextId)
           || this.storageArea.isExempted(options.url, tab.id)) {
         return {};
       }
@@ -325,8 +350,8 @@ window.assignManager = {
     } else {
       this.reloadPageInContainer(
         options.url,
-        userContextId,
-        siteSettings.userContextId,
+        currentUserContextId,
+        siteSettings.userContextIds,
         tab.index + 1,
         tab.active,
         siteSettings.neverAsk,
@@ -578,6 +603,7 @@ window.assignManager = {
     // Context menu has stored context IDs as strings, so we need to coerce
     // the value to a string for accurate checking
     userContextId = String(userContextId);
+    let siteSettings = await this.storageArea.get(pageUrl);
 
     if (!remove) {
       const tabs = await browser.tabs.query({});
@@ -594,14 +620,24 @@ window.assignManager = {
         return tab.id;
       });
 
-      await this.storageArea.set(pageUrl, {
-        userContextId,
-        neverAsk: false
-      }, exemptedTabIds);
+      if (!siteSettings) {
+        siteSettings = { userContextIds: [userContextId], neverAsk: false };
+      } else if (!siteSettings.userContextIds.includes(userContextId)) {
+        siteSettings.userContextIds.push(userContextId);
+      }
+      await this.storageArea.set(pageUrl, siteSettings, exemptedTabIds);
       actionName = "assigned site to always open in this container";
     } else {
-      // Remove assignment
-      await this.storageArea.remove(pageUrl);
+      if (siteSettings) {
+        siteSettings.userContextIds = siteSettings.userContextIds.filter(
+          id => id !== userContextId
+        );
+        if (!siteSettings.userContextIds.length) {
+          await this.storageArea.remove(pageUrl);
+        } else {
+          await this.storageArea.set(pageUrl, siteSettings);
+        }
+      }
 
       actionName = "removed from assigned sites list";
 
@@ -673,7 +709,7 @@ window.assignManager = {
     let menuId = this.MENU_ASSIGN_ID;
     const tabUserContextId = this.getUserContextIdFromCookieStore(tab);
     if (siteSettings &&
-        Number(siteSettings.userContextId) === Number(tabUserContextId)) {
+        siteSettings.userContextIds.includes(tabUserContextId)) {
       checked = true;
       menuId = this.MENU_REMOVE_ID;
     }
@@ -733,15 +769,19 @@ window.assignManager = {
     browser.tabs.create({url, cookieStoreId, index, active, openerTabId});
   },
 
-  reloadPageInContainer(url, currentUserContextId, userContextId, index, active, neverAsk = false, openerTabId = null) {
-    const cookieStoreId = backgroundLogic.cookieStoreId(userContextId);
-    const loadPage = browser.runtime.getURL("confirm-page.html");
+  reloadPageInContainer(url, currentUserContextId, userContextIdList, index, active, neverAsk = false, openerTabId = null) {
     // False represents assignment is not permitted
     // If the user has explicitly checked "Never Ask Again" on the warning page we will send them straight there
     if (neverAsk) {
+      const cookieStoreId = backgroundLogic.cookieStoreId(userContextIdList[0]);
       return browser.tabs.create({url, cookieStoreId, index, active, openerTabId});
     } else {
-      let confirmUrl = `${loadPage}?url=${this.encodeURLProperty(url)}&cookieStoreId=${cookieStoreId}`;
+      const loadPage = browser.runtime.getURL("confirm-page.html");
+      const cookieStoreIds = [];
+      for (const userContextId of userContextIdList) {
+        cookieStoreIds.push(backgroundLogic.cookieStoreId(userContextId));
+      }
+      let confirmUrl = `${loadPage}?url=${this.encodeURLProperty(url)}&cookieStoreIds=${cookieStoreIds.join(",")}`;
       let currentCookieStoreId;
       if (currentUserContextId) {
         currentCookieStoreId = backgroundLogic.cookieStoreId(currentUserContextId);
