@@ -770,6 +770,9 @@ window.assignManager = {
   },
 
   reloadPageInContainer(url, currentUserContextId, userContextIdList, index, active, neverAsk = false, openerTabId = null) {
+    if (!Array.isArray(userContextIdList)) {
+      userContextIdList = [userContextIdList];
+    }
     // False represents assignment is not permitted
     // If the user has explicitly checked "Never Ask Again" on the warning page we will send them straight there
     if (neverAsk) {
