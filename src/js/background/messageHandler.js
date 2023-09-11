@@ -86,7 +86,9 @@ const messageHandler = {
           m.tabIndex,
           m.active,
           m.newUserContextId
-        );
+        ).then(tab => {
+          assignManager.storageArea.setExempted(m.url, tab.id);
+        });
         break;
       case "assignAndReloadInContainer":
         tab = await assignManager.reloadPageInContainer(
