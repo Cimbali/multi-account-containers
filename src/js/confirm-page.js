@@ -1,7 +1,7 @@
 async function load() {
   const searchParams = new URL(window.location).searchParams;
   const redirectUrl = searchParams.get("url");
-  const cookieStoreId = searchParams.get("cookieStoreId");
+  const cookieStoreIds = searchParams.get("cookieStoreIds").split(",");
   const currentCookieStoreId = searchParams.get("currentCookieStoreId");
   const redirectUrlElement = document.getElementById("redirect-url");
   redirectUrlElement.textContent = redirectUrl;
@@ -17,20 +17,40 @@ async function load() {
     denySubmit(redirectUrl);
   });
 
-  const container = await browser.contextualIdentities.get(cookieStoreId);
+  const containers = await Promise.all(
+    cookieStoreIds.map(id => browser.contextualIdentities.get(id))
+  );
   const currentContainer = currentCookieStoreId ? await browser.contextualIdentities.get(currentCookieStoreId) : null;
   const currentContainerName = currentContainer ? setDenyButton(currentContainer.name) : setDenyButton("");
+  const allContainerNames = containers.map(container => container.name).join(", ");
 
   document.querySelectorAll("[data-message-id]").forEach(el => {
     const elementData = el.dataset;
-    const containerName = elementData.messageArg === "container-name" ? container.name : currentContainerName;
+    const containerName = elementData.messageArg === "all-container-names" ? allContainerNames : currentContainerName;
     el.textContent = browser.i18n.getMessage(elementData.messageId, containerName);
   });
 
-  document.getElementById("confirm").addEventListener("click", (e) => {
+  const firstContainerButton = document.getElementById("confirm");
+  const openMessageId = firstContainerButton.dataset.messageId;
+  firstContainerButton.textContent = browser.i18n.getMessage(openMessageId, containers[0].name);
+  firstContainerButton.addEventListener("click", (e) => {
     e.preventDefault();
-    confirmSubmit(redirectUrl, cookieStoreId);
+    confirmSubmit(redirectUrl, cookieStoreIds[0]);
   });
+
+  const buttonContainer = firstContainerButton.parentNode;
+  for (const [containerName, cookieStoreId] of containers.map(
+    (container, idx) => [container.name, cookieStoreIds[idx]]).slice(1)
+  ) {
+    const extraContainerButton = document.createElement("button");
+    extraContainerButton.classList.add("button", "primary");
+    extraContainerButton.textContent = browser.i18n.getMessage(openMessageId, containerName);
+    extraContainerButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      confirmSubmit(redirectUrl, cookieStoreId);
+    });
+    buttonContainer.append(extraContainerButton);
+  }
 }
 
 function setDenyButton(currentContainerName) {
