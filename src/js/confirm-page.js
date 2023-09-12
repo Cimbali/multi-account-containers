@@ -78,7 +78,7 @@ function confirmSubmit(redirectUrl, cookieStoreId) {
   if (neverAsk) {
     browser.runtime.sendMessage({
       method: "neverAsk",
-      neverAsk: true,
+      cookieStoreId,
       pageUrl: redirectUrl
     });
   }

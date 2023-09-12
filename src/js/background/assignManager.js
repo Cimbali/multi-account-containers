@@ -106,6 +106,9 @@ window.assignManager = {
       const deleteKeys = [];
       for (const [urlKey, urlData] of Object.entries(sitesByContainer)) {
         urlData.userContextIds = urlData.userContextIds.filter(id => id !== userContextId);
+        if (urlData.neverAsk === userContextId) {
+          urlData.neverAsk = false;
+        }
         if (urlData.userContextIds.length) {
           this.set(urlKey, urlData, []);
         } else {
@@ -180,12 +183,19 @@ window.assignManager = {
 
   _neverAsk(m) {
     const pageUrl = m.pageUrl;
-    if (m.neverAsk === true) {
+    const neverAsk = m.cookieStoreId === "firefox-default" ? 0
+      : backgroundLogic.getUserContextIdFromCookieStoreId(
+        m.cookieStoreId,
+      );
+    if (neverAsk !== false) {
       // If we have existing data and for some reason it hasn't been
       // deleted etc lets update it
       this.storageArea.get(pageUrl).then((siteSettings) => {
         if (siteSettings) {
-          siteSettings.neverAsk = true;
+          if (!siteSettings.userContextIds.includes(neverAsk)) {
+            return;
+          }
+          siteSettings.neverAsk = neverAsk;
           this.storageArea.set(pageUrl, siteSettings);
         }
       }).catch((e) => {
@@ -252,6 +262,9 @@ window.assignManager = {
       // more so lets remove it
       if (!container) {
         this.deleteContainer(userContextId);
+        if (siteSettings.neverAsk === userContextId) {
+          siteSettings.neverAsk = false;
+        }
         continue;
       }
       containers.push(container);
@@ -632,6 +645,9 @@ window.assignManager = {
         siteSettings.userContextIds = siteSettings.userContextIds.filter(
           id => id !== userContextId
         );
+        if (siteSettings.neverAsk === userContextId) {
+          siteSettings.neverAsk = false;
+        }
         if (!siteSettings.userContextIds.length) {
           await this.storageArea.remove(pageUrl);
         } else {
@@ -770,13 +786,10 @@ window.assignManager = {
   },
 
   reloadPageInContainer(url, currentUserContextId, userContextIdList, index, active, neverAsk = false, openerTabId = null) {
-    if (!Array.isArray(userContextIdList)) {
-      userContextIdList = [userContextIdList];
-    }
     // False represents assignment is not permitted
     // If the user has explicitly checked "Never Ask Again" on the warning page we will send them straight there
     if (neverAsk) {
-      const cookieStoreId = backgroundLogic.cookieStoreId(userContextIdList[0]);
+      const cookieStoreId = backgroundLogic.cookieStoreId(neverAsk);
       return browser.tabs.create({url, cookieStoreId, index, active, openerTabId});
     } else {
       const loadPage = browser.runtime.getURL("confirm-page.html");

@@ -82,20 +82,20 @@ const messageHandler = {
         response = assignManager.reloadPageInContainer(
           m.url,
           m.currentUserContextId,
-          m.newUserContextId,
+          [],
           m.tabIndex,
           m.active,
-          true
+          m.newUserContextId
         );
         break;
       case "assignAndReloadInContainer":
         tab = await assignManager.reloadPageInContainer(
           m.url, 
           m.currentUserContextId,
-          m.newUserContextId, 
+          [],
           m.tabIndex, 
           m.active,
-          true
+          m.newUserContextId
         );
         // m.tabId is used for where to place the in content message
         // m.url is the assignment to be removed/added
