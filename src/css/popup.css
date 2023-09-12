@@ -1827,6 +1827,13 @@ manage things like container crud */
   flex: 1;
 }
 
+.menu-item td > label {
+  align-items: center;
+  display: flex;
+  inline-size: 100%;
+  padding-inline: 8px;
+}
+
 .radio-choice > .radio-container {
   align-items: center;
   block-size: 32px;
