@@ -56,11 +56,27 @@ window.assignManager = {
       return !!replaceTabEnabled;
     },
 
+    userContextToList(siteConfig) {
+      if ("userContextIds" in siteConfig) {
+        return siteConfig;
+      }
+      const {
+        userContextId,
+        neverAsk: boolNeverAsk = false,
+        ...rest
+      } = siteConfig;
+      return {
+        userContextIds: [userContextId],
+        neverAsk: boolNeverAsk ? userContextId : false,
+        ...rest,
+      };
+    },
+
     getByUrlKey(siteStoreKey) {
       return new Promise((resolve, reject) => {
         this.area.get([siteStoreKey]).then((storageResponse) => {
           if (storageResponse && siteStoreKey in storageResponse) {
-            resolve(storageResponse[siteStoreKey]);
+            resolve(this.userContextToList(storageResponse[siteStoreKey]));
           } else {
             resolve(null);
           }
@@ -124,11 +140,11 @@ window.assignManager = {
       const siteConfigs = await this.area.get();
       for(const urlKey of Object.keys(siteConfigs)) {
         if (urlKey.includes("siteContainerMap@@_")) {
+          const site = this.userContextToList(siteConfigs[urlKey]);
           if (!!userContextId &&
-              !siteConfigs[urlKey].userContextIds.includes(String(userContextId))) {
+              !site.userContextIds.includes(String(userContextId))) {
             continue;
           }
-          const site = siteConfigs[urlKey];
           // In hindsight we should have stored this
           // TODO file a follow up to clean the storage onLoad
           site.hostname = urlKey.replace(/^siteContainerMap@@_/, "");
@@ -148,10 +164,10 @@ window.assignManager = {
       const macConfigs = await this.area.get();
       for(const configKey of Object.keys(macConfigs)) {
         if (configKey.includes("siteContainerMap@@_")) {
+          const siteConfig = this.userContextToList(macConfigs[configKey]);
           const validContextIds = [];
-          for (const userContextId of macConfigs[configKey].userContextIds) {
-            const cookieStoreId =
-              "firefox-container-" + macConfigs[configKey].userContextId;
+          for (const userContextId of siteConfig.userContextIds) {
+            const cookieStoreId = backgroundLogic.cookieStoreId(userContextId);
             const match = identitiesList.find(
               localIdentity => localIdentity.cookieStoreId === cookieStoreId
             );
@@ -163,7 +179,7 @@ window.assignManager = {
             await this.remove(configKey);
             continue;
           }
-          const updatedSiteAssignment = macConfigs[configKey];
+          const updatedSiteAssignment = siteConfig;
           updatedSiteAssignment.userContextIds = validContextIds;
           updatedSiteAssignment.identityMacAddonUUIDList = await Promise.all(
             validContextIds.map(id => identityState.lookupMACaddonUUID(id))
