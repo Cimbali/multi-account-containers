@@ -1,8 +1,8 @@
 # Multi-Account Containers
 
-[![Test](https://github.com/mozilla/multi-account-containers/actions/workflows/test.yaml/badge.svg)](https://github.com/mozilla/multi-account-containers/actions/workflows/test.yaml)
+[![Test](https://github.com/Cimbali/multi-account-containers/actions/workflows/test.yaml/badge.svg)](https://github.com/Cimbali/multi-account-containers/actions/workflows/test.yaml)
 
-The Firefox Multi-Account Containers extension lets you carve out a separate box for each of your online lives – no more opening a different browser just to check your work email!
+This fork of [Firefox Multi-Account Containers](https://github.com/mozilla/multi-account-containers/) extension lets you carve out a separate box for each of your online lives – no more opening a different browser just to check your work email - with the additional option
 
 Learn more about Multi-Account Containers in
 [our end-user documentation][enduser].
