@@ -509,6 +509,9 @@ async function reconcileSiteAssignments() {
       if (!("identityMacAddonUUIDList" in assignedSite)) {
         if ("identityMacAddonUUID" in assignedSite) {
           assignedSite.identityMacAddonUUIDList = [assignedSite.identityMacAddonUUID];
+          if (assignedSite.neverAsk === true) {
+            assignedSite.neverAsk = assignedSite.identityMacAddonUUID;
+          }
         } else {
           continue;
         }

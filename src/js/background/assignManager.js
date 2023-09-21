@@ -57,7 +57,12 @@ window.assignManager = {
     },
 
     userContextToList(siteConfig) {
+      if ("userContextIds" in siteConfig && siteConfig.neverAsk !== true) {
+        return siteConfig;
+      }
       if ("userContextIds" in siteConfig) {
+        siteConfig.neverAsk = siteConfig.userContextIds.length === 1 ?
+          siteConfig.userContextIds[0] : false;
         return siteConfig;
       }
       const {
@@ -184,6 +189,13 @@ window.assignManager = {
           updatedSiteAssignment.identityMacAddonUUIDList = await Promise.all(
             validContextIds.map(id => identityState.lookupMACaddonUUID(id))
           );
+          if (updatedSiteAssignment.neverAsk === true) {
+            if (validContextIds.length === 1) {
+              updatedSiteAssignment.neverAsk = validContextIds[0];
+            } else {
+              updatedSiteAssignment.neverAsk = false;
+            }
+          }
           await this.set(
             configKey,
             updatedSiteAssignment,
