@@ -26,7 +26,7 @@ const buildDom = async ({background = {}, popup = {}}) => {
   background = {
     ...background,
     jsdom: {
-      ...background.jsom,
+      ...background.jsdom,
       beforeParse(window) {
         window.browser.permissions.getAll.resolves({permissions: ["bookmarks"]});
         window.crypto = {

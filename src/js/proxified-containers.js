@@ -64,7 +64,8 @@ proxifiedContainers = {
   // Deletes the proxy information object for a specified cookieStoreId [useful for cleaning]
   async delete(cookieStoreId) {
     // Assumes proxy is a properly formatted object
-    const proxifiedContainersStore = await proxifiedContainers.retrieveAll();
+    let proxifiedContainersStore = await proxifiedContainers.retrieveAll();
+    if (!proxifiedContainersStore) proxifiedContainersStore = [];
     const index = proxifiedContainersStore.findIndex(i => i.cookieStoreId === cookieStoreId);
     if (index !== -1) {
       proxifiedContainersStore.splice(index, 1);
