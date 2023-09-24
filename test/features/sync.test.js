@@ -1,4 +1,4 @@
-const {initializeWithTab} = require("../common");
+const {initializeWithTab, expect} = require("../common");
 
 describe("Sync", function() {
   beforeEach(async function() {
@@ -77,41 +77,42 @@ describe("Sync", function() {
       SITE_ASSIGNMENT_TEST
     );
 
-    // add 200ok (bad data).
     const testSites = {
       "siteContainerMap@@_developer.mozilla.org": {
         "userContextIds": ["588"],
-        "neverAsk": ["588"],
+        "neverAsk": "588",
         "identityMacAddonUUIDList": ["d20d7af2-9866-468e-bb43-541efe8c2c2e"],
         "hostname": "developer.mozilla.org"
       },
       "siteContainerMap@@_reddit.com": {
         "userContextIds": ["592"],
-        "neverAsk": true,
+        "neverAsk": "592",
         "identityMacAddonUUIDList": ["3dc916fb-8c0a-4538-9758-73ef819a45f7"],
         "hostname": "reddit.com"
       },
       "siteContainerMap@@_twitter.com": {
         "userContextIds": ["589"],
-        "neverAsk": true,
+        "neverAsk": false,
         "identityMacAddonUUIDList": ["cdd73c20-c26a-4c06-9b17-735c1f5e9187"],
         "hostname": "twitter.com"
       },
+      // next 2 in format used before multi-assignment, to check compatibility
       "siteContainerMap@@_www.facebook.com": {
-        "userContextIds": ["590"],
-        "neverAsk": true,
-        "identityMacAddonUUIDList": ["32cc4a9b-05ed-4e54-8e11-732468de62f4"],
+        "userContextId": "590",
+        "neverAsk": false,
+        "identityMacAddonUUID": "32cc4a9b-05ed-4e54-8e11-732468de62f4",
         "hostname": "www.facebook.com"
       },
       "siteContainerMap@@_www.linkedin.com": {
-        "userContextIds": ["591"],
+        "userContextId": "591",
         "neverAsk": true,
-        "identityMacAddonUUIDList": ["9ff381e3-4c11-420d-8e12-e352a3318be1"],
+        "identityMacAddonUUID": "9ff381e3-4c11-420d-8e12-e352a3318be1",
         "hostname": "www.linkedin.com"
       },
+      // bad data
       "siteContainerMap@@_200ok.us": {
         "userContextIds": ["1"],
-        "neverAsk": true,
+        "neverAsk": "1",
         "identityMacAddonUUIDList": ["b5f5f794-b37e-4cec-9f4e-6490df620336"],
         "hostname": "www.linkedin.com"
       }
@@ -128,6 +129,11 @@ describe("Sync", function() {
 
     const assignedSites = await this.webExt.background.window.assignManager.storageArea.getAssignedSites();
     Object.keys(assignedSites).should.have.lengthOf(6);
+    for (const assignment of Object.values(assignedSites)) {
+      expect(assignment.userContextIds).to.be.an("array");
+      expect(assignment.identityMacAddonUUIDList).to.be.an("array");
+      expect(assignment.neverAsk).to.satisfy(s => typeof s === "string" || s === false);
+    }
   });
 
   it("testInitialSync", async function() {
@@ -211,13 +217,10 @@ class SyncTestHelper {
         await this.webExt.browser.contextualIdentities.create(identityData[i]);
       // fill identies with site assignments
       if (assignmentData && assignmentData[i]) {
-        const data =  { 
-          "userContextId": 
-            String(
-              newIdentity.cookieStoreId.replace(/^firefox-container-/, "")
-            ),
-          "neverAsk": true
-        };
+        const contextId = String(
+          newIdentity.cookieStoreId.replace(/^firefox-container-/, "")
+        );
+        const data =  {userContextIds: [contextId], neverAsk: contextId};
   
         await this.webExt.browser.storage.local.set({[assignmentData[i]]: data});
       }
