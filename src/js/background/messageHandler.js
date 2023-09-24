@@ -82,20 +82,22 @@ const messageHandler = {
         response = assignManager.reloadPageInContainer(
           m.url,
           m.currentUserContextId,
-          m.newUserContextId,
+          [],
           m.tabIndex,
           m.active,
-          true
-        );
+          m.newUserContextId
+        ).then(tab => {
+          assignManager.storageArea.setExempted(m.url, tab.id);
+        });
         break;
       case "assignAndReloadInContainer":
         tab = await assignManager.reloadPageInContainer(
           m.url, 
           m.currentUserContextId,
-          m.newUserContextId, 
+          [],
           m.tabIndex, 
           m.active,
-          true
+          m.newUserContextId
         );
         // m.tabId is used for where to place the in content message
         // m.url is the assignment to be removed/added
@@ -137,6 +139,22 @@ const messageHandler = {
       let response;
       switch (message.method) {
       case "getAssignment":
+        if (typeof message.url === "undefined") {
+          throw new Error("Missing message.url");
+        }
+        response = await assignManager.storageArea.get(message.url);
+        // To not break backwards compatibility of external addons, reply
+        // to getAssignment with an old-style single assignment
+        response = {
+          userContextId: response.userContextIds[0],
+          identityMacAddonUUID: response.identityMacAddonUUIDList[0],
+          neverAsk: !!response.neverAsk,
+          ...Object.fromEntries(Object.entries(response).filter(([key, ]) =>
+            !["userContextIds", "identityMacAddonUUIDList", "neverAsk"].includes(key)
+          ))
+        };
+        break;
+      case "getAssignmentList":
         if (typeof message.url === "undefined") {
           throw new Error("Missing message.url");
         }

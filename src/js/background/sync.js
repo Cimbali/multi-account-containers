@@ -146,8 +146,12 @@ const sync = {
       async function updateSyncSiteAssignments() {
         const assignedSites = 
           await assignManager.storageArea.getAssignedSites();
-        for (const siteKey of Object.keys(assignedSites)) {
-          await sync.storageArea.set({ [siteKey]: assignedSites[siteKey] });
+        for (const [siteKey, siteSettings] of Object.entries(assignedSites)) {
+          // Don’t send user context ids, they are meaningless across installations
+          delete siteSettings.userContextIds;
+          // be nice to pre-9.x synced MAC addons
+          siteSettings["identityMacAddonUUID"] = siteSettings["identityMacAddonUUIDList"][0];
+          await sync.storageArea.set({ [siteKey]: siteSettings });
         }
         return assignedSites;
       }
@@ -501,20 +505,31 @@ async function reconcileSiteAssignments() {
 
   for(const urlKey of Object.keys(assignedSitesFromSync)) {
     const assignedSite = assignedSitesFromSync[urlKey];
-    try{
-      if (assignedSite.identityMacAddonUUID) {
+    try {
+      if (!("identityMacAddonUUIDList" in assignedSite)) {
+        if ("identityMacAddonUUID" in assignedSite) {
+          assignedSite.identityMacAddonUUIDList = [assignedSite.identityMacAddonUUID];
+          if (assignedSite.neverAsk === true) {
+            assignedSite.neverAsk = assignedSite.identityMacAddonUUID;
+          }
+        } else {
+          continue;
+        }
+      }
+
       // Sync is truth.
       // Not even looking it up. Just overwrite
-        if (SYNC_DEBUG){ 
-          const isInStorage = await assignManager.storageArea.getByUrlKey(urlKey);
-          if (!isInStorage)
-            console.log("new assignment ", assignedSite);
-        }
-
-        await setAssignmentWithUUID(assignedSite, urlKey);
-        continue;
+      if (SYNC_DEBUG) {
+        const isInStorage = await assignManager.storageArea.getByUrlKey(urlKey);
+        if (!isInStorage)
+          console.log("new assignment ", assignedSite);
       }
+
+      await setAssignmentWithUUID(assignedSite, urlKey);
     } catch (error) {
+      if (SYNC_DEBUG){
+        console.log("Skipping", assignedSite, "due to", error);
+      }
       // this is probably old or incorrect site info in Sync
       // skip and move on.
     }
@@ -562,19 +577,24 @@ async function removeOldDeletedItems() {
 }
 
 async function setAssignmentWithUUID(assignedSite, urlKey) {
-  const uuid = assignedSite.identityMacAddonUUID;
-  const cookieStoreId = await identityState.lookupCookieStoreId(uuid);
-  if (cookieStoreId) {
-    // eslint-disable-next-line require-atomic-updates
-    assignedSite.userContextId = cookieStoreId
-      .replace(/^firefox-container-/, "");
-    await assignManager.storageArea.set(
-      urlKey,
-      assignedSite,
-      false,
-      false
-    );
-    return;
+  const uuidList = assignedSite.identityMacAddonUUIDList;
+  const userContextIds = [];
+  for (const uuid of uuidList) {
+    const cookieStoreId = await identityState.lookupCookieStoreId(uuid);
+    if (cookieStoreId) {
+      // eslint-disable-next-line require-atomic-updates
+      userContextIds.push(cookieStoreId.replace(/^firefox-container-/, ""));
+    }
   }
-  throw new Error (`No cookieStoreId found for: ${uuid}, ${urlKey}`);
+  if (!userContextIds.length) {
+    throw new Error (`No cookieStoreId found for ${urlKey} from ${uuidList}`);
+  } else if (userContextIds.length !== uuidList.length) {
+    console.error(`${uuidList.length - userContextIds.length} unmatched cookiesStoreIds from ${uuidList}`);
+  }
+  await assignManager.storageArea.set(
+    urlKey,
+    {...assignedSite, userContextIds},
+    false,
+    false
+  );
 }

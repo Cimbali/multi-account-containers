@@ -151,11 +151,10 @@ window.identityState = {
     // exist, this.get() will create it, which is not what we want.
     const cookieStoreIdKey = cookieStoreId.includes("firefox-container-") ? 
       cookieStoreId : "firefox-container-" + cookieStoreId;
-    const macConfigs = await this.storageArea.area.get();
-    for(const configKey of Object.keys(macConfigs)) {
-      if (configKey === this.storageArea.getContainerStoreKey(cookieStoreIdKey)) {
-        return macConfigs[configKey].macAddonUUID;
-      }
+    const storeKey = this.storageArea.getContainerStoreKey(cookieStoreIdKey);
+    const macConfig = await this.storageArea.area.get([storeKey]);
+    if (macConfig && storeKey in macConfig) {
+      return macConfig[storeKey].macAddonUUID;
     }
     return false;
   },

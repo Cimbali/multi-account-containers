@@ -56,11 +56,32 @@ window.assignManager = {
       return !!replaceTabEnabled;
     },
 
+    userContextToList(siteConfig) {
+      if ("userContextIds" in siteConfig && siteConfig.neverAsk !== true) {
+        return siteConfig;
+      }
+      if ("userContextIds" in siteConfig) {
+        siteConfig.neverAsk = siteConfig.userContextIds.length === 1 ?
+          siteConfig.userContextIds[0] : false;
+        return siteConfig;
+      }
+      const {
+        userContextId,
+        neverAsk: boolNeverAsk = false,
+        ...rest
+      } = siteConfig;
+      return {
+        userContextIds: [userContextId],
+        neverAsk: boolNeverAsk ? userContextId : false,
+        ...rest,
+      };
+    },
+
     getByUrlKey(siteStoreKey) {
       return new Promise((resolve, reject) => {
         this.area.get([siteStoreKey]).then((storageResponse) => {
           if (storageResponse && siteStoreKey in storageResponse) {
-            resolve(storageResponse[siteStoreKey]);
+            resolve(this.userContextToList(storageResponse[siteStoreKey]));
           } else {
             resolve(null);
           }
@@ -78,8 +99,9 @@ window.assignManager = {
         });
       }
       // eslint-disable-next-line require-atomic-updates
-      data.identityMacAddonUUID =
-        await identityState.lookupMACaddonUUID(data.userContextId);
+      data.identityMacAddonUUIDList = await Promise.all(
+        data.userContextIds.map(id => identityState.lookupMACaddonUUID(id))
+      );
       await this.area.set({
         [siteStoreKey]: data
       });
@@ -102,7 +124,19 @@ window.assignManager = {
 
     async deleteContainer(userContextId) {
       const sitesByContainer = await this.getAssignedSites(userContextId);
-      this.area.remove(Object.keys(sitesByContainer));
+      const deleteKeys = [];
+      for (const [urlKey, urlData] of Object.entries(sitesByContainer)) {
+        urlData.userContextIds = urlData.userContextIds.filter(id => id !== userContextId);
+        if (urlData.neverAsk === userContextId) {
+          urlData.neverAsk = false;
+        }
+        if (urlData.userContextIds.length) {
+          this.set(urlKey, urlData, []);
+        } else {
+          deleteKeys.push(urlKey);
+        }
+      }
+      this.area.remove(deleteKeys);
       identityState.storageArea.remove(backgroundLogic.cookieStoreId(userContextId));
     },
 
@@ -111,14 +145,11 @@ window.assignManager = {
       const siteConfigs = await this.area.get();
       for(const urlKey of Object.keys(siteConfigs)) {
         if (urlKey.includes("siteContainerMap@@_")) {
-        // For some reason this is stored as string... lets check
-        // them both as that
+          const site = this.userContextToList(siteConfigs[urlKey]);
           if (!!userContextId &&
-              String(siteConfigs[urlKey].userContextId)
-                !== String(userContextId)) {
+              !site.userContextIds.includes(String(userContextId))) {
             continue;
           }
-          const site = siteConfigs[urlKey];
           // In hindsight we should have stored this
           // TODO file a follow up to clean the storage onLoad
           site.hostname = urlKey.replace(/^siteContainerMap@@_/, "");
@@ -138,18 +169,33 @@ window.assignManager = {
       const macConfigs = await this.area.get();
       for(const configKey of Object.keys(macConfigs)) {
         if (configKey.includes("siteContainerMap@@_")) {
-          const cookieStoreId =
-            "firefox-container-" + macConfigs[configKey].userContextId;
-          const match = identitiesList.find(
-            localIdentity => localIdentity.cookieStoreId === cookieStoreId
-          );
-          if (!match) {
+          const siteConfig = this.userContextToList(macConfigs[configKey]);
+          const validContextIds = [];
+          for (const userContextId of siteConfig.userContextIds) {
+            const cookieStoreId = backgroundLogic.cookieStoreId(userContextId);
+            const match = identitiesList.find(
+              localIdentity => localIdentity.cookieStoreId === cookieStoreId
+            );
+            if (match) {
+              validContextIds.push(userContextId);
+            }
+          }
+          if (!validContextIds.length) {
             await this.remove(configKey);
             continue;
           }
-          const updatedSiteAssignment = macConfigs[configKey];
-          updatedSiteAssignment.identityMacAddonUUID =
-            await identityState.lookupMACaddonUUID(match.cookieStoreId);
+          const updatedSiteAssignment = siteConfig;
+          updatedSiteAssignment.userContextIds = validContextIds;
+          updatedSiteAssignment.identityMacAddonUUIDList = await Promise.all(
+            validContextIds.map(id => identityState.lookupMACaddonUUID(id))
+          );
+          if (updatedSiteAssignment.neverAsk === true) {
+            if (validContextIds.length === 1) {
+              updatedSiteAssignment.neverAsk = validContextIds[0];
+            } else {
+              updatedSiteAssignment.neverAsk = false;
+            }
+          }
           await this.set(
             configKey,
             updatedSiteAssignment,
@@ -165,12 +211,19 @@ window.assignManager = {
 
   _neverAsk(m) {
     const pageUrl = m.pageUrl;
-    if (m.neverAsk === true) {
+    const neverAsk = m.cookieStoreId === "firefox-default" ? 0
+      : backgroundLogic.getUserContextIdFromCookieStoreId(
+        m.cookieStoreId,
+      );
+    if (neverAsk !== false) {
       // If we have existing data and for some reason it hasn't been
       // deleted etc lets update it
       this.storageArea.get(pageUrl).then((siteSettings) => {
         if (siteSettings) {
-          siteSettings.neverAsk = true;
+          if (!siteSettings.userContextIds.includes(neverAsk)) {
+            return;
+          }
+          siteSettings.neverAsk = neverAsk;
           this.storageArea.set(pageUrl, siteSettings);
         }
       }).catch((e) => {
@@ -223,21 +276,34 @@ window.assignManager = {
       browser.tabs.get(options.tabId),
       this.storageArea.get(options.url)
     ]);
-    let container;
-    try {
-      container = await browser.contextualIdentities
-        .get(backgroundLogic.cookieStoreId(siteSettings.userContextId));
-    } catch (e) {
-      container = false;
+    const containers = [];
+    for (const userContextId of (siteSettings ? siteSettings.userContextIds : [])) {
+      let container;
+      try {
+        container = await browser.contextualIdentities
+          .get(backgroundLogic.cookieStoreId(userContextId));
+      } catch (e) {
+        container = false;
+      }
+
+      // The container we have in the assignment map isn't present any
+      // more so lets remove it
+      if (!container) {
+        this.deleteContainer(userContextId);
+        if (siteSettings.neverAsk === userContextId) {
+          siteSettings.neverAsk = false;
+        }
+        continue;
+      }
+      containers.push(container);
     }
 
-    // The container we have in the assignment map isn't present any
-    // more so lets remove it then continue the existing load
-    if (siteSettings && !container) {
-      this.deleteContainer(siteSettings.userContextId);
+    // No container we have in the assignment map is present any
+    // more so lets continue the existing load
+    if (siteSettings && !containers.length) {
       return {};
     }
-    const userContextId = this.getUserContextIdFromCookieStore(tab);
+    const currentUserContextId = this.getUserContextIdFromCookieStore(tab);
 
     // https://github.com/mozilla/multi-account-containers/issues/847
     //
@@ -261,7 +327,7 @@ window.assignManager = {
 
     if (!siteIsolatedReloadInDefault) {
       if (!siteSettings
-          || userContextId === siteSettings.userContextId
+          || siteSettings.userContextIds.includes(currentUserContextId)
           || this.storageArea.isExempted(options.url, tab.id)) {
         return {};
       }
@@ -325,8 +391,8 @@ window.assignManager = {
     } else {
       this.reloadPageInContainer(
         options.url,
-        userContextId,
-        siteSettings.userContextId,
+        currentUserContextId,
+        siteSettings.userContextIds,
         tab.index + 1,
         tab.active,
         siteSettings.neverAsk,
@@ -578,6 +644,7 @@ window.assignManager = {
     // Context menu has stored context IDs as strings, so we need to coerce
     // the value to a string for accurate checking
     userContextId = String(userContextId);
+    let siteSettings = await this.storageArea.get(pageUrl);
 
     if (!remove) {
       const tabs = await browser.tabs.query({});
@@ -594,14 +661,27 @@ window.assignManager = {
         return tab.id;
       });
 
-      await this.storageArea.set(pageUrl, {
-        userContextId,
-        neverAsk: false
-      }, exemptedTabIds);
+      if (!siteSettings) {
+        siteSettings = { userContextIds: [userContextId], neverAsk: false };
+      } else if (!siteSettings.userContextIds.includes(userContextId)) {
+        siteSettings.userContextIds.push(userContextId);
+      }
+      await this.storageArea.set(pageUrl, siteSettings, exemptedTabIds);
       actionName = "assigned site to always open in this container";
     } else {
-      // Remove assignment
-      await this.storageArea.remove(pageUrl);
+      if (siteSettings) {
+        siteSettings.userContextIds = siteSettings.userContextIds.filter(
+          id => id !== userContextId
+        );
+        if (siteSettings.neverAsk === userContextId) {
+          siteSettings.neverAsk = false;
+        }
+        if (!siteSettings.userContextIds.length) {
+          await this.storageArea.remove(pageUrl);
+        } else {
+          await this.storageArea.set(pageUrl, siteSettings);
+        }
+      }
 
       actionName = "removed from assigned sites list";
 
@@ -673,7 +753,7 @@ window.assignManager = {
     let menuId = this.MENU_ASSIGN_ID;
     const tabUserContextId = this.getUserContextIdFromCookieStore(tab);
     if (siteSettings &&
-        Number(siteSettings.userContextId) === Number(tabUserContextId)) {
+        siteSettings.userContextIds.includes(tabUserContextId)) {
       checked = true;
       menuId = this.MENU_REMOVE_ID;
     }
@@ -733,15 +813,19 @@ window.assignManager = {
     browser.tabs.create({url, cookieStoreId, index, active, openerTabId});
   },
 
-  reloadPageInContainer(url, currentUserContextId, userContextId, index, active, neverAsk = false, openerTabId = null) {
-    const cookieStoreId = backgroundLogic.cookieStoreId(userContextId);
-    const loadPage = browser.runtime.getURL("confirm-page.html");
+  reloadPageInContainer(url, currentUserContextId, userContextIdList, index, active, neverAsk = false, openerTabId = null) {
     // False represents assignment is not permitted
     // If the user has explicitly checked "Never Ask Again" on the warning page we will send them straight there
     if (neverAsk) {
+      const cookieStoreId = backgroundLogic.cookieStoreId(neverAsk);
       return browser.tabs.create({url, cookieStoreId, index, active, openerTabId});
     } else {
-      let confirmUrl = `${loadPage}?url=${this.encodeURLProperty(url)}&cookieStoreId=${cookieStoreId}`;
+      const loadPage = browser.runtime.getURL("confirm-page.html");
+      const cookieStoreIds = [];
+      for (const userContextId of userContextIdList) {
+        cookieStoreIds.push(backgroundLogic.cookieStoreId(userContextId));
+      }
+      let confirmUrl = `${loadPage}?url=${this.encodeURLProperty(url)}&cookieStoreIds=${cookieStoreIds.join(",")}`;
       let currentCookieStoreId;
       if (currentUserContextId) {
         currentCookieStoreId = backgroundLogic.cookieStoreId(currentUserContextId);

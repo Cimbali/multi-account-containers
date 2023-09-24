@@ -348,6 +348,22 @@ const Logic = {
     });
   },
 
+  async getIdentitiesAndAssignments(tab) {
+    const assignments = await this.getAssignment(tab);
+    if (!assignments) {
+      return this._identities.map(identity => ({
+        contextId: Utils.userContextId(identity.cookieStoreId),
+        isAssigned: false,
+        ...identity
+      }));
+    }
+    return this._identities.map(identity => {
+      const contextId = Utils.userContextId(identity.cookieStoreId);
+      const isAssigned = assignments.userContextIds.includes(String(contextId));
+      return {contextId, isAssigned, ...identity};
+    });
+  },
+
   getAssignmentObjectByContainer(userContextId) {
     if (!userContextId) {
       return {};
@@ -1371,7 +1387,8 @@ Logic.registerPanel(ALWAYS_OPEN_IN_PICKER, {
 
   // This method is called when the panel is shown.
   async prepare() {
-    const identities = Logic.identities();
+    const currentTab = await Utils.currentTab();
+    const identities = await Logic.getIdentitiesAndAssignments(currentTab);
     Logic.listenToPickerBackButton();
     document.getElementById("picker-title").textContent = browser.i18n.getMessage("alwaysOpenIn");
     const fragment = document.createDocumentFragment();
@@ -1385,6 +1402,8 @@ Logic.registerPanel(ALWAYS_OPEN_IN_PICKER, {
       const td = document.createElement("td");
 
       td.innerHTML = Utils.escaped`
+        <label>
+        <input type="checkbox" ${identity.isAssigned ? "checked=\"checked\" " : ""}/>
         <div class="menu-icon hover-highlight">
           <div class="usercontext-icon"
             data-identity-icon="${identity.icon}"
@@ -1392,15 +1411,24 @@ Logic.registerPanel(ALWAYS_OPEN_IN_PICKER, {
           </div>
         </div>
         <span class="menu-text">${identity.name}</span>
+        </label>
         `;
 
       fragment.appendChild(tr);
 
       tr.appendChild(td);
 
+      const checkbox = tr.querySelector("input");
+      checkbox.addEventListener("change", () => {
+        Utils.setOrRemoveAssignment(
+          currentTab.id, currentTab.url, identity.contextId, !checkbox.checked
+        );
+      });
       Utils.addEnterHandler(tr, () => {
-        Utils.alwaysOpenInContainer(identity);
-        window.close();
+        checkbox.checked = !checkbox.checked;
+        Utils.setOrRemoveAssignment(
+          currentTab.id, currentTab.url, identity.contextId, !checkbox.checked
+        );
       });
     }
 

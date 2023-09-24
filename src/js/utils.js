@@ -178,7 +178,7 @@ const Utils = {
     if (typeof currentTheme !== "undefined" && currentTheme !== "auto") {
       return currentTheme;
     }
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    if (Object.hasOwn(window, "matchMedia") && window.matchMedia("(prefers-color-scheme: dark)").matches) {
       return "dark";
     }
     return "light";

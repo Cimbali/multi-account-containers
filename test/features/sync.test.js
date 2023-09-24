@@ -1,4 +1,4 @@
-const {initializeWithTab} = require("../common");
+const {initializeWithTab, expect} = require("../common");
 
 describe("Sync", function() {
   beforeEach(async function() {
@@ -46,8 +46,8 @@ describe("Sync", function() {
 
     await this.webExt.browser.storage.local.set({
       "siteContainerMap@@_www.goop.com": { 
-        "userContextId": "999",
-        "neverAsk": true
+        "userContextIds": ["999"],
+        "neverAsk": "999"
       }
     });
 
@@ -63,7 +63,7 @@ describe("Sync", function() {
     }
     assignments.should.have.lengthOf(5, "There should be 5 site assignments");
     for (const assignment of assignments) {
-      (!!assignment.identityMacAddonUUID).should.be.true;
+      (!!assignment.identityMacAddonUUIDList).should.be.true;
     }
   });
 
@@ -77,29 +77,29 @@ describe("Sync", function() {
       SITE_ASSIGNMENT_TEST
     );
 
-    // add 200ok (bad data).
     const testSites = {
       "siteContainerMap@@_developer.mozilla.org": {
-        "userContextId": "588",
-        "neverAsk": true,
-        "identityMacAddonUUID": "d20d7af2-9866-468e-bb43-541efe8c2c2e",
+        "userContextIds": ["588"],
+        "neverAsk": "588",
+        "identityMacAddonUUIDList": ["d20d7af2-9866-468e-bb43-541efe8c2c2e"],
         "hostname": "developer.mozilla.org"
       },
       "siteContainerMap@@_reddit.com": {
-        "userContextId": "592",
-        "neverAsk": true,
-        "identityMacAddonUUID": "3dc916fb-8c0a-4538-9758-73ef819a45f7",
+        "userContextIds": ["592"],
+        "neverAsk": "592",
+        "identityMacAddonUUIDList": ["3dc916fb-8c0a-4538-9758-73ef819a45f7"],
         "hostname": "reddit.com"
       },
       "siteContainerMap@@_twitter.com": {
-        "userContextId": "589",
-        "neverAsk": true,
-        "identityMacAddonUUID": "cdd73c20-c26a-4c06-9b17-735c1f5e9187",
+        "userContextIds": ["589"],
+        "neverAsk": false,
+        "identityMacAddonUUIDList": ["cdd73c20-c26a-4c06-9b17-735c1f5e9187"],
         "hostname": "twitter.com"
       },
+      // next 2 in format used before multi-assignment, to check compatibility
       "siteContainerMap@@_www.facebook.com": {
         "userContextId": "590",
-        "neverAsk": true,
+        "neverAsk": false,
         "identityMacAddonUUID": "32cc4a9b-05ed-4e54-8e11-732468de62f4",
         "hostname": "www.facebook.com"
       },
@@ -109,10 +109,11 @@ describe("Sync", function() {
         "identityMacAddonUUID": "9ff381e3-4c11-420d-8e12-e352a3318be1",
         "hostname": "www.linkedin.com"
       },
+      // bad data
       "siteContainerMap@@_200ok.us": {
-        "userContextId": "1",
-        "neverAsk": true,
-        "identityMacAddonUUID": "b5f5f794-b37e-4cec-9f4e-6490df620336",
+        "userContextIds": ["1"],
+        "neverAsk": "1",
+        "identityMacAddonUUIDList": ["b5f5f794-b37e-4cec-9f4e-6490df620336"],
         "hostname": "www.linkedin.com"
       }
     };
@@ -128,6 +129,11 @@ describe("Sync", function() {
 
     const assignedSites = await this.webExt.background.window.assignManager.storageArea.getAssignedSites();
     Object.keys(assignedSites).should.have.lengthOf(6);
+    for (const assignment of Object.values(assignedSites)) {
+      expect(assignment.userContextIds).to.be.an("array");
+      expect(assignment.identityMacAddonUUIDList).to.be.an("array");
+      expect(assignment.neverAsk).to.satisfy(s => typeof s === "string" || s === false);
+    }
   });
 
   it("testInitialSync", async function() {
@@ -211,13 +217,10 @@ class SyncTestHelper {
         await this.webExt.browser.contextualIdentities.create(identityData[i]);
       // fill identies with site assignments
       if (assignmentData && assignmentData[i]) {
-        const data =  { 
-          "userContextId": 
-            String(
-              newIdentity.cookieStoreId.replace(/^firefox-container-/, "")
-            ),
-          "neverAsk": true
-        };
+        const contextId = String(
+          newIdentity.cookieStoreId.replace(/^firefox-container-/, "")
+        );
+        const data =  {userContextIds: [contextId], neverAsk: contextId};
   
         await this.webExt.browser.storage.local.set({[assignmentData[i]]: data});
       }
@@ -373,33 +376,33 @@ const DUPE_TEST_SYNC = {
     "macAddonUUID": "63e5212f-0858-418e-b5a3-09c2dea61fcd"
   },
   "siteContainerMap@@_developer.mozilla.org": {
-    "userContextId": "588",
-    "neverAsk": true,
-    "identityMacAddonUUID": "d20d7af2-9866-468e-bb43-541efe8c2c2e",
+    "userContextIds": ["588"],
+    "neverAsk": "588",
+    "identityMacAddonUUIDList": ["d20d7af2-9866-468e-bb43-541efe8c2c2e"],
     "hostname": "developer.mozilla.org"
   },
   "siteContainerMap@@_reddit.com": {
-    "userContextId": "592",
-    "neverAsk": true,
-    "identityMacAddonUUID": "3dc916fb-8c0a-4538-9758-73ef819a45f7",
+    "userContextIds": ["592"],
+    "neverAsk": "592",
+    "identityMacAddonUUIDList": ["3dc916fb-8c0a-4538-9758-73ef819a45f7"],
     "hostname": "reddit.com"
   },
   "siteContainerMap@@_twitter.com": {
-    "userContextId": "589",
-    "neverAsk": true,
-    "identityMacAddonUUID": "cdd73c20-c26a-4c06-9b17-735c1f5e9187",
+    "userContextIds": ["589"],
+    "neverAsk": "589",
+    "identityMacAddonUUIDList": ["cdd73c20-c26a-4c06-9b17-735c1f5e9187"],
     "hostname": "twitter.com"
   },
   "siteContainerMap@@_www.facebook.com": {
-    "userContextId": "590",
-    "neverAsk": true,
-    "identityMacAddonUUID": "32cc4a9b-05ed-4e54-8e11-732468de62f4",
+    "userContextIds": ["590"],
+    "neverAsk": "590",
+    "identityMacAddonUUIDList": ["32cc4a9b-05ed-4e54-8e11-732468de62f4"],
     "hostname": "www.facebook.com"
   },
   "siteContainerMap@@_www.linkedin.com": {
-    "userContextId": "591",
-    "neverAsk": true,
-    "identityMacAddonUUID": "9ff381e3-4c11-420d-8e12-e352a3318be1",
+    "userContextIds": ["591"],
+    "neverAsk": "591",
+    "identityMacAddonUUIDList": ["9ff381e3-4c11-420d-8e12-e352a3318be1"],
     "hostname": "www.linkedin.com"
   }
 };
