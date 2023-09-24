@@ -39,6 +39,28 @@ describe("External Webextensions", function () {
         Object.prototype.hasOwnProperty.call(
           answer, "identityMacAddonUUID")).to.be.true;
     });
+
+    it("should be able to get multiple assignments", async function () {
+      this.webExt.background.browser.management.get.resolves({
+        permissions: ["contextualIdentities"]
+      });
+
+      const message = {
+        method: "getAssignmentList",
+        url
+      };
+      const sender = {
+        id: "external-webextension"
+      };
+
+      const [promise] = this.webExt.background.browser.runtime.onMessageExternal.addListener.yield(message, sender);
+      const answer = await promise;
+      expect(answer.userContextIds).to.deep.equal(["4"]);
+      expect(answer.neverAsk).to.satisfy(val => val === false || typeof val === "string");
+      expect(
+        Object.prototype.hasOwnProperty.call(
+          answer, "identityMacAddonUUIDList")).to.be.true;
+    });
   });
 
   describe("without contextualIdentities permissions", function () {

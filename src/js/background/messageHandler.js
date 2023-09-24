@@ -140,6 +140,22 @@ const messageHandler = {
         if (typeof message.url === "undefined") {
           throw new Error("Missing message.url");
         }
+        response = await assignManager.storageArea.get(message.url);
+        // To not break backwards compatibility of external addons, reply
+        // to getAssignment with an old-style single assignment
+        response = {
+          userContextId: response.userContextIds[0],
+          identityMacAddonUUID: response.identityMacAddonUUIDList[0],
+          neverAsk: !!response.neverAsk,
+          ...Object.fromEntries(Object.entries(response).filter(([key, ]) =>
+            !["userContextIds", "identityMacAddonUUIDList", "neverAsk"].includes(key)
+          ))
+        };
+        break;
+      case "getAssignmentList":
+        if (typeof message.url === "undefined") {
+          throw new Error("Missing message.url");
+        }
         response = assignManager.storageArea.get(message.url);
         break;
       default:
